@@ -1,0 +1,20 @@
+# Spica AI - Training config (1M-tier, data-scaled run)
+# 20000-step run (en/hi 500K/496K) plateaued -- val_loss flat 2.03-2.19 last
+# ~5000 steps as cosine LR hit min_lr. Dataset limits raised in preprocess.py
+# (en/hi 500K -> 2M each) for more variety; max_steps extended so the
+# resumed run gets a fresh decay tail instead of sitting at min_lr the whole time.
+
+batch_size: 32
+max_steps: 40000        # extended for continued/resumed training on bigger dataset
+eval_interval: 500      # run validation loss every N steps
+eval_iters: 50          # average val loss over this many batches
+log_interval: 50        # print training loss every N steps
+
+learning_rate: 3.0e-4
+min_lr: 3.0e-5
+warmup_steps: 500
+weight_decay: 0.1
+grad_clip: 1.0
+
+checkpoint_dir: "checkpoints/model_1m"
+checkpoint_interval: 500

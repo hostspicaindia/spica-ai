@@ -1,0 +1,15 @@
+# Spica AI - 1M tier (testing/smoke-test model)
+#
+# "1M" refers to non-embedding (transformer body) parameters, not the total.
+# The Qwen tokenizer's vocab (151,665) forces a large embedding table
+# regardless of model tier - see prompt.md discussion. Real total params
+# with this config ~= 20.6M (body ~1.18M + tied embedding ~19.4M).
+
+vocab_size: 151665      # fixed by Qwen tokenizer, do not change
+block_size: 128         # max context length (sequence length) in tokens
+n_layer: 6              # number of transformer blocks
+n_embd: 128             # embedding / hidden dimension
+n_head: 4               # attention heads (head_dim = n_embd / n_head = 32)
+dropout: 0.1
+tied_embeddings: true   # output LM head reuses the token embedding matrix
+bias: true              # use bias terms in Linear/LayerNorm layers
