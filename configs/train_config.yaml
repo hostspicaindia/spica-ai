@@ -8,7 +8,7 @@
 # (~49GB) over the full run; at 2500 it's 40 files (~10GB), safer for disk.
 
 batch_size: 32
-max_steps: 100000       # 1 lakh, extended for the vast.ai RTX 5090 run
+max_steps: 600000       # sized to ~7hr of an 8hr vast.ai RTX 5090 budget (0.0427s/step observed)
 eval_interval: 500      # run validation loss every N steps
 eval_iters: 50          # average val loss over this many batches
 log_interval: 1000      # print training loss every N steps
@@ -20,4 +20,4 @@ weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_1m"
-checkpoint_interval: 10000
+checkpoint_interval: 25000
