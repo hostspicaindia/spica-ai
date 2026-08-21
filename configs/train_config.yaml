@@ -1,11 +1,14 @@
-# Spica AI - Training config (1M-tier, data-scaled run)
+# Spica AI - Training config (1M-tier, 1-lakh-step run on vast.ai)
 # 20000-step run (en/hi 500K/496K) plateaued -- val_loss flat 2.03-2.19 last
 # ~5000 steps as cosine LR hit min_lr. Dataset limits raised in preprocess.py
-# (en/hi 500K -> 2M each) for more variety; max_steps extended so the
-# resumed run gets a fresh decay tail instead of sitting at min_lr the whole time.
+# (en/hi 500K -> 2M each) for more variety; max_steps extended to 100000 so
+# the resumed run (from step 20000) gets a long fresh decay tail on the RTX
+# 5090 instance instead of sitting at min_lr. checkpoint_interval widened to
+# 2500 (was 500) -- at 500 this would write 200 x ~247MB step_*.pt files
+# (~49GB) over the full run; at 2500 it's 40 files (~10GB), safer for disk.
 
 batch_size: 32
-max_steps: 40000        # extended for continued/resumed training on bigger dataset
+max_steps: 100000       # 1 lakh, extended for the vast.ai RTX 5090 run
 eval_interval: 500      # run validation loss every N steps
 eval_iters: 50          # average val loss over this many batches
 log_interval: 50        # print training loss every N steps
@@ -17,4 +20,4 @@ weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_1m"
-checkpoint_interval: 500
+checkpoint_interval: 2500
