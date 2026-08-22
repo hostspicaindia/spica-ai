@@ -1,24 +1,26 @@
-# Spica AI - Training config (100M-tier, DDP calibration run)
-# Single-GPU calibration (5000 steps) measured ~0.1578s/step, val_loss
-# 3.24->1.88 still descending. Full single-GPU run was sized to 300000
-# steps (~13.2hr) but never run -- switched to a 2x RTX 5090 DDP instance
-# instead. max_steps dropped back to 5000 here to calibrate DDP's real
-# per-step time (effective batch doubles to 16 under 2-GPU DDP, but
-# per-step WALL TIME doesn't automatically halve -- only data throughput
-# does -- so this needs its own measurement, not an assumption).
-# Restore max_steps (and rescale checkpoint_interval) once DDP speed is known.
+# Spica AI - Training config (100M-tier, full run)
+# DDP on 2x RTX 5090 tested and abandoned -- PHB (host-bridge-routed,
+# no NVLink) interconnect made 2-GPU throughput WORSE than single-GPU
+# (0.519s/step vs 0.1578s/step measured). RTX 5090 is a consumer card
+# with no NVLink at all, so this isn't fixable by picking a different
+# 2x5090 host -- back to plain single-GPU for this tier.
+#
+# Restored to the original full-run sizing: 300000 steps (~2.33 epochs
+# over the 528M-token corpus, ~13.2hr at the measured 0.1578s/step).
+# checkpoint_interval=60000 -> 5 files * ~2.6GB ~= 13GB, safe on this
+# instance's 100GB disk.
 
-batch_size: 8             # PER GPU under DDP -- effective global batch 16 on 2x GPU
-max_steps: 5000           # DDP calibration -- restore to full-run size once speed is known
-eval_interval: 250
+batch_size: 8
+max_steps: 300000        # ~2.33 epochs, ~13.2hr at measured 0.1578s/step
+eval_interval: 500
 eval_iters: 50
-log_interval: 100
+log_interval: 1000
 
 learning_rate: 3.0e-4
 min_lr: 3.0e-5
-warmup_steps: 200
+warmup_steps: 500
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_100m"
-checkpoint_interval: 1000
+checkpoint_interval: 60000
