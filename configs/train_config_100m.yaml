@@ -1,0 +1,25 @@
+# Spica AI - Training config (100M-tier, initial calibration run)
+# Same approach as the 1M->10M jump: short calibration run first to
+# measure real s/step + confirm no OOM, then extend max_steps.
+#
+# batch_size=8 (not 16) -- block_size doubled 256->512 vs the 10M tier,
+# so batch_size halved to keep tokens/step at 4096 (8*512), matching the
+# known-safe scale from the 10M tier's fix (that OOM'd at 64*256=16384
+# tokens/step due to the huge Qwen-vocab logits tensor in cross_entropy,
+# not model size). Model itself is also ~3.1x bigger now (216M vs 69M
+# total params) so checkpoints will be ~3.1x bigger too (~2.6GB vs ~828MB).
+
+batch_size: 8
+max_steps: 5000          # calibration run -- extend once real s/step is known
+eval_interval: 250
+eval_iters: 50
+log_interval: 100
+
+learning_rate: 3.0e-4
+min_lr: 3.0e-5
+warmup_steps: 200
+weight_decay: 0.1
+grad_clip: 1.0
+
+checkpoint_dir: "checkpoints/model_100m"
+checkpoint_interval: 1000
