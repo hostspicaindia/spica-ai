@@ -1,26 +1,24 @@
-# Spica AI - Training config (10M-tier, initial calibration run)
-# Deliberately short (max_steps 5000) -- same approach as the 1M tier: run
-# short first, measure real s/step on this bigger model + block_size=256,
-# then extend max_steps once the actual throughput is known.
-#
-# batch_size=16 (not 64) -- OOM'd at 64: cross_entropy builds a
-# (batch_size*block_size, vocab_size) logits tensor, and vocab_size=151665
-# (Qwen) makes that tensor huge regardless of model size. At 64*256 tokens
-# it was ~9.94GB just for logits (forward), doubling again in backward --
-# not a model-capacity problem, a huge-vocab-times-batch problem. 16*256=4096
-# tokens/step matches the known-safe 1M-tier scale (32*128=4096).
+# Spica AI - Training config (10M-tier, full run)
+# Calibration run (5000 steps, single 1x RTX 5090 spot instance) measured
+# ~0.063s/step and a healthy still-descending val_loss (3.24 -> 2.03),
+# confirming batch_size=16 (4096 tokens/step, same scale as the 1M tier)
+# fits comfortably in VRAM. max_steps sized to 500000 (~8.75hr wall-clock,
+# ~4.6 epochs over the 528M-token corpus) -- at this instance's $0.015/hr
+# cost is a non-issue, time and data-repetition are the real constraints.
+# checkpoint_interval widened 1000 -> 25000 (20 files * ~828MB ~= 16.6GB,
+# safe on this instance's 32GB disk alongside data + deps).
 
 batch_size: 16
-max_steps: 5000         # calibration run -- extend once real s/step is known
-eval_interval: 250      # run validation loss every N steps
+max_steps: 500000       # full run, ~8.75hr at measured 0.063s/step
+eval_interval: 500      # run validation loss every N steps
 eval_iters: 50          # average val loss over this many batches
-log_interval: 100       # print training loss every N steps
+log_interval: 1000      # print training loss every N steps
 
 learning_rate: 3.0e-4
 min_lr: 3.0e-5
-warmup_steps: 200
+warmup_steps: 500
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_10m"
-checkpoint_interval: 1000
+checkpoint_interval: 25000
