@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 TOKENIZED_DIR = ROOT_DIR / "data" / "tokenized"
@@ -40,6 +41,21 @@ class TokenDataset(Dataset):
         return x, y
 
 
-def get_dataloader(split: str, block_size: int, batch_size: int, shuffle: bool = True) -> DataLoader:
+def get_dataloader(
+    split: str,
+    block_size: int,
+    batch_size: int,
+    shuffle: bool = True,
+    distributed: bool = False,
+    rank: int = 0,
+    world_size: int = 1,
+) -> DataLoader:
+    """batch_size is PER PROCESS (per GPU) under DDP -- effective global
+    batch size is batch_size * world_size, since each rank pulls its own
+    shard via DistributedSampler and runs it through its own model replica.
+    """
     dataset = TokenDataset(split, block_size)
+    if distributed:
+        sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=shuffle)
+        return DataLoader(dataset, batch_size=batch_size, sampler=sampler)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
