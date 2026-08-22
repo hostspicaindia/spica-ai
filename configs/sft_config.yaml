@@ -1,0 +1,25 @@
+# Spica AI - SFT (instruction-tuning) config
+# Fine-tunes an already-pretrained checkpoint on (prompt, response) pairs
+# (src/data/sft_dataset.py masks loss to response tokens only). Much
+# smaller learning_rate than pretraining -- SFT should nudge weights
+# toward following instructions, not relearn language from scratch -- and
+# far fewer steps, since the instruction dataset (tens of thousands of
+# examples) is tiny next to the pretraining corpus (millions of sentences).
+
+train_data: "data/sft/train.jsonl"
+val_data: "data/sft/val.jsonl"
+
+batch_size: 16
+max_steps: 3000          # calibration run -- extend once real s/step + val_loss trend is known
+eval_interval: 100
+eval_iters: 20
+log_interval: 50
+
+learning_rate: 5.0e-5    # ~6x smaller than pretraining LR -- fine-tune, don't relearn
+min_lr: 5.0e-6
+warmup_steps: 100
+weight_decay: 0.1
+grad_clip: 1.0
+
+checkpoint_dir: "checkpoints/model_10m_sft"
+checkpoint_interval: 500

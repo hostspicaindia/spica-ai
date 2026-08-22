@@ -10,6 +10,12 @@ Usage:
     python -m src.inference.generate --prompt "Once upon a time"
     python -m src.inference.generate --prompt "Namaste" --max-new-tokens 100 --top-k 50
     python -m src.inference.generate --checkpoint checkpoints/model_1m/step_1500.pt --prompt "hello"
+
+For an SFT-tuned checkpoint (src/training/sft_trainer.py), add --instruct so
+the prompt gets wrapped in the same "### Instruction:\n...\n\n### Response:\n"
+template used during training (see src/data/prepare_sft.py) -- testing with
+the raw prompt otherwise won't match what the model was fine-tuned on:
+    python -m src.inference.generate --checkpoint checkpoints/model_10m_sft/latest.pt --instruct --prompt "Explain gravity simply"
 """
 
 import argparse
@@ -57,6 +63,10 @@ def main():
     parser.add_argument("--max-new-tokens", type=int, default=80)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=50)
+    parser.add_argument(
+        "--instruct", action="store_true",
+        help="wrap prompt in the SFT instruction template (use with an SFT checkpoint)",
+    )
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -66,7 +76,11 @@ def main():
     model = load_model(str(checkpoint_path), device)
     tokenizer = load_tokenizer()
 
-    idx = torch.tensor([tokenizer.encode(args.prompt)], dtype=torch.long, device=device)
+    prompt = args.prompt
+    if args.instruct:
+        prompt = f"### Instruction:\n{args.prompt}\n\n### Response:\n"
+
+    idx = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long, device=device)
     out = model.generate(
         idx,
         max_new_tokens=args.max_new_tokens,

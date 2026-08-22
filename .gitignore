@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-venv/
-data/
-checkpoints/
-logs/
+/venv/
+/data/
+/checkpoints/
+/logs/
+*.pt
