@@ -1,11 +1,16 @@
 # Spica AI - Training config (10M-tier, initial calibration run)
 # Deliberately short (max_steps 5000) -- same approach as the 1M tier: run
 # short first, measure real s/step on this bigger model + block_size=256,
-# then extend max_steps once the actual throughput is known. Batch size
-# raised vs the 1M tier (32 -> 64) -- dual RTX 5090 with 32GB VRAM each has
-# huge headroom for a ~69M-param model.
+# then extend max_steps once the actual throughput is known.
+#
+# batch_size=16 (not 64) -- OOM'd at 64: cross_entropy builds a
+# (batch_size*block_size, vocab_size) logits tensor, and vocab_size=151665
+# (Qwen) makes that tensor huge regardless of model size. At 64*256 tokens
+# it was ~9.94GB just for logits (forward), doubling again in backward --
+# not a model-capacity problem, a huge-vocab-times-batch problem. 16*256=4096
+# tokens/step matches the known-safe 1M-tier scale (32*128=4096).
 
-batch_size: 64
+batch_size: 16
 max_steps: 5000         # calibration run -- extend once real s/step is known
 eval_interval: 250      # run validation loss every N steps
 eval_iters: 50          # average val loss over this many batches
