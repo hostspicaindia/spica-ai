@@ -1,26 +1,24 @@
-# Spica AI - Training config (100M-tier, full run)
-# Calibration (5000 steps) measured ~0.1578s/step, no OOM, val_loss
-# 3.24->1.88 still descending -- already ahead of the 10M tier's
-# calibration result (2.03) at the same step count. max_steps sized to
-# 300000 (~2.33 epochs over the 528M-token corpus, ~13.2hr wall-clock) --
-# past the steep part of the loss curve (10M tier's rate of improvement
-# slowed noticeably after ~250k-300k steps on the same data) without
-# chasing the long flat tail.
-#
-# checkpoint_interval=60000 -> 5 files * ~2.6GB ~= 13GB, safe within the
-# 26GB free after cleaning up the 10M tier's intermediate checkpoints.
+# Spica AI - Training config (100M-tier, DDP calibration run)
+# Single-GPU calibration (5000 steps) measured ~0.1578s/step, val_loss
+# 3.24->1.88 still descending. Full single-GPU run was sized to 300000
+# steps (~13.2hr) but never run -- switched to a 2x RTX 5090 DDP instance
+# instead. max_steps dropped back to 5000 here to calibrate DDP's real
+# per-step time (effective batch doubles to 16 under 2-GPU DDP, but
+# per-step WALL TIME doesn't automatically halve -- only data throughput
+# does -- so this needs its own measurement, not an assumption).
+# Restore max_steps (and rescale checkpoint_interval) once DDP speed is known.
 
-batch_size: 8
-max_steps: 300000        # ~2.33 epochs, ~13.2hr at measured 0.1578s/step
-eval_interval: 500
+batch_size: 8             # PER GPU under DDP -- effective global batch 16 on 2x GPU
+max_steps: 5000           # DDP calibration -- restore to full-run size once speed is known
+eval_interval: 250
 eval_iters: 50
-log_interval: 1000
+log_interval: 100
 
 learning_rate: 3.0e-4
 min_lr: 3.0e-5
-warmup_steps: 500
+warmup_steps: 200
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_100m"
-checkpoint_interval: 60000
+checkpoint_interval: 1000
