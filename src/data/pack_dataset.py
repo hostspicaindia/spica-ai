@@ -40,14 +40,20 @@ def load_sentences(lang: str) -> list[str]:
     return sentences
 
 
-def tokenize_sentences(tokenizer, sentences: list[str], lang: str) -> list[list[int]]:
-    token_lists = []
+def tokenize_sentences(tokenizer, sentences: list[str], lang: str) -> list[np.ndarray]:
+    # store each sentence's tokens as an int32 array immediately, not a
+    # Python list -- a Python list of ints costs ~36 bytes/token (object +
+    # pointer overhead), a numpy array costs 4. At 500M-tier scale
+    # (7M English sentences, ~939M total tokens) the Python-list version
+    # of this data alone approaches ~34GB, enough to exhaust a 32GB-RAM
+    # instance and make it unresponsive well before packing finishes.
+    token_arrays = []
     for text in sentences:
         ids = tokenizer.encode(text)
         ids.append(tokenizer.eos_token_id)  # marks sentence boundary for the model
-        token_lists.append(ids)
-    logger.info(f"{lang}: tokenized {len(token_lists)} sentences")
-    return token_lists
+        token_arrays.append(np.array(ids, dtype=np.int32))
+    logger.info(f"{lang}: tokenized {len(token_arrays)} sentences")
+    return token_arrays
 
 
 def main():
@@ -74,8 +80,12 @@ def main():
 
     # int32 (not uint16/uint32) - vocab_size 151665 exceeds uint16 range, and
     # int32 has full numpy/torch support unlike unsigned 32-bit types.
-    train_ids = np.array([tok for sent in train_lists for tok in sent], dtype=np.int32)
-    val_ids = np.array([tok for sent in val_lists for tok in sent], dtype=np.int32)
+    # np.concatenate on the already-int32 per-sentence arrays (not a Python
+    # list comprehension over individual ints) -- avoids ever materializing
+    # a giant Python list of ints, which is what exhausted RAM at 500M-tier
+    # data scale (see tokenize_sentences).
+    train_ids = np.concatenate(train_lists) if train_lists else np.array([], dtype=np.int32)
+    val_ids = np.concatenate(val_lists) if val_lists else np.array([], dtype=np.int32)
 
     TOKENIZED_DIR.mkdir(parents=True, exist_ok=True)
     train_ids.tofile(TOKENIZED_DIR / "train.bin")
