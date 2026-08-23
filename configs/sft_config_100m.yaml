@@ -7,24 +7,32 @@
 # pretraining-config OOM: cross_entropy's logits tensor scales with
 # batch*block_size*vocab_size regardless of which config it came from).
 #
-# max_steps scaled for batch8 to cover the same ~5 epochs the 10M SFT
-# used (50935 pairs / 8 ~= 6367 steps/epoch * 5 ~= 31835, rounded to 32000).
-# checkpoint_interval=8000 -> 4 files * ~2.6GB ~= 10.4GB.
+# First run (max_steps=32000, ~5 epochs over the 50935-pair Alpaca-only
+# set) produced a degenerate repetition loop ("first line of the first
+# line...") -- overfitting on a small, templated (GPT-generated) dataset,
+# not undertraining. Data expanded to 382179 pairs (Alpaca + Dolly +
+# AI4Bharat Indic-Instruct, ~155K of it genuinely Hindi) via
+# prepare_sft.py. max_steps rescaled for batch8 to cover 3 epochs over
+# the new set (382179/8 ~= 47772 steps/epoch * 3 ~= 143317, rounded to
+# 143000) -- fewer epochs than before since the bigger, more diverse
+# data needs less repetition to cover, and repetition is exactly what
+# caused the earlier overfitting.
+# checkpoint_interval=15000 -> ~10 files * ~2.6GB ~= 26GB.
 
 train_data: "data/sft/train.jsonl"
 val_data: "data/sft/val.jsonl"
 
 batch_size: 8              # matches 100M pretraining's safe scale (8*512=4096 tokens/step)
-max_steps: 32000           # ~5 epochs over 50935 pairs at batch_size 8
-eval_interval: 400
+max_steps: 143000          # ~3 epochs over 382179 pairs at batch_size 8
+eval_interval: 1500
 eval_iters: 20
-log_interval: 400
+log_interval: 1500
 
 learning_rate: 5.0e-5      # ~6x smaller than pretraining LR -- fine-tune, don't relearn
 min_lr: 5.0e-6
-warmup_steps: 600
+warmup_steps: 2500
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_100m_sft"
-checkpoint_interval: 8000
+checkpoint_interval: 15000
