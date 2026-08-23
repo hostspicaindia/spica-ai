@@ -1,0 +1,29 @@
+# Spica AI - Training config (500M-tier, initial calibration run)
+# Same calibration-first approach as every prior tier jump: short run to
+# measure real s/step + confirm no OOM, then extend max_steps.
+#
+# batch_size=4 keeps tokens/step at 4096 (4*1024), matching the known-safe
+# scale established at every prior tier (cross_entropy's logits tensor
+# scales with batch*block_size*vocab_size regardless of model size --
+# this is what OOM'd the 10M tier at 64*256 and would OOM here far worse
+# at a careless batch size given block_size=1024).
+#
+# Checkpoints at this tier are much bigger: ~687M total params * 4 bytes
+# weights (~2.75GB) + optimizer 2x (~5.5GB) ~= ~8.25GB PER FILE. Even
+# calibration's checkpoint_interval is kept sparse (2500, not 1000) to
+# avoid ~41GB of calibration-only checkpoint writes.
+
+batch_size: 4
+max_steps: 5000          # calibration run -- extend once real s/step is known
+eval_interval: 250
+eval_iters: 50
+log_interval: 100
+
+learning_rate: 3.0e-4
+min_lr: 3.0e-5
+warmup_steps: 200
+weight_decay: 0.1
+grad_clip: 1.0
+
+checkpoint_dir: "checkpoints/model_500m"
+checkpoint_interval: 2500

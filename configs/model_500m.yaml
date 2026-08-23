@@ -1,0 +1,24 @@
+# Spica AI - 500M tier
+#
+# "500M" refers to non-embedding (transformer body) params, same convention
+# as model_1m/10m/100m.yaml. Body params = ~493.25M by hand calculation
+# (25 blocks * ~19.68M/block + pos_embed + ln_f). Qwen vocab (151,665)
+# still forces a large tied-embedding table regardless of tier -- at
+# n_embd=1280 that's ~194.1M, so real total params ~= 687.4M.
+#
+# block_size raised 512 -> 1024 vs the 100M tier -- no dataset repack
+# needed for this alone (block_size is only consumed at DataLoader
+# read-time, see src/data/dataset.py). BUT this tier also needs the
+# pretraining corpus scaled up separately (see preprocess.py's raised
+# --limit-en) since 528M tokens is well under Chinchilla-optimal
+# (~20 tokens/param ~= 9.9B tokens) for a 493M-param body -- that DOES
+# need a repack once the English limit is raised.
+
+vocab_size: 151665      # fixed by Qwen tokenizer, do not change
+block_size: 1024        # max context length (sequence length) in tokens
+n_layer: 25               # number of transformer blocks
+n_embd: 1280              # embedding / hidden dimension
+n_head: 20                 # attention heads (head_dim = n_embd / n_head = 64)
+dropout: 0.1
+tied_embeddings: true    # output LM head reuses the token embedding matrix
+bias: true                 # use bias terms in Linear/LayerNorm layers

@@ -111,7 +111,7 @@ def process_hinglish() -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--limit-en", type=int, default=2_000_000, help="max English sentences to keep")
+    parser.add_argument("--limit-en", type=int, default=7_000_000, help="max English sentences to keep")
     parser.add_argument("--limit-hi", type=int, default=2_000_000, help="max Hindi sentences to keep")
     args = parser.parse_args()
 
