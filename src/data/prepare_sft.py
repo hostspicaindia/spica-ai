@@ -9,10 +9,24 @@ pattern as src/data/preprocess.py's per-language loaders.
 
 Currently implemented:
     English instruction-following -- tatsu-lab/alpaca (52,002 examples)
-
-TODO: Hindi/Hinglish instruction data -- no confirmed-working HF dataset
-picked yet. Add a load_*() function below following the same pattern once
-a source is chosen, then wire it into main().
+        GPT-generated, alpaca-style. Prone to templated/repetitive
+        patterns (a likely contributor to the 100M-tier SFT's degenerate
+        "first line of the first line" repetition-loop output) since it's
+        synthetic, not human-written.
+    English instruction-following -- databricks/databricks-dolly-15k (~15K)
+        Human-written, more natural variety than Alpaca -- mixed in
+        specifically to counter Alpaca's templated-pattern overfitting risk.
+    English + Hindi -- ai4bharat/indic-instruct-data-v0.1 (~404K total
+        across 8 sub-datasets x en/hi splits: anudesh, dolly, flan_v2,
+        hh-rlhf, lm_sys, nmt-seed, oasst1, wikihow). Same AI4Bharat org as
+        the IndicCorpV2 pretraining source already used and verified
+        working. This is the fix for the project's actual biggest SFT gap
+        -- zero Hindi/Hinglish instruction data until now. Multi-turn
+        "messages" format (list of {role, content}) -- decomposed into
+        individual (user, assistant) turn pairs, each treated as its own
+        single-turn training example (keeps the same prompt/response
+        format as every other source; loses cross-turn context but keeps
+        the dataset format simple and consistent).
 
 Usage:
     python -m src.data.prepare_sft
@@ -35,6 +49,15 @@ SFT_DIR = ROOT_DIR / "data" / "sft"
 
 SEED = 42
 
+INDIC_CONFIGS = ["anudesh", "dolly", "flan_v2", "hh-rlhf", "lm_sys", "nmt-seed", "oasst1", "wikihow"]
+INDIC_LANGS = ["en", "hi"]
+
+
+def _format_prompt(instruction: str, extra_input: str = "") -> str:
+    if extra_input:
+        return f"### Instruction:\n{instruction}\n\n### Input:\n{extra_input}\n\n### Response:\n"
+    return f"### Instruction:\n{instruction}\n\n### Response:\n"
+
 
 def load_alpaca_en() -> list[dict]:
     """English instruction-following pairs from tatsu-lab/alpaca."""
@@ -49,14 +72,63 @@ def load_alpaca_en() -> list[dict]:
         if not instruction or not output:
             continue
 
-        if extra_input:
-            prompt = f"### Instruction:\n{instruction}\n\n### Input:\n{extra_input}\n\n### Response:\n"
-        else:
-            prompt = f"### Instruction:\n{instruction}\n\n### Response:\n"
+        records.append({"prompt": _format_prompt(instruction, extra_input), "response": output, "source": "alpaca_en"})
 
-        records.append({"prompt": prompt, "response": output, "source": "alpaca_en"})
+    logger.info(f"English instructions (alpaca): kept {len(records)} pairs")
+    return records
 
-    logger.info(f"English instructions: kept {len(records)} pairs")
+
+def load_dolly_en() -> list[dict]:
+    """Human-written English instructions from databricks/databricks-dolly-15k."""
+    logger.info("loading English instructions: databricks/databricks-dolly-15k")
+    ds = load_dataset("databricks/databricks-dolly-15k", split="train")
+
+    records = []
+    for row in ds:
+        instruction = row["instruction"].strip()
+        extra_input = row.get("context", "").strip()
+        response = row["response"].strip()
+        if not instruction or not response:
+            continue
+
+        records.append({"prompt": _format_prompt(instruction, extra_input), "response": response, "source": "dolly_en"})
+
+    logger.info(f"English instructions (dolly): kept {len(records)} pairs")
+    return records
+
+
+def load_indic_instruct() -> list[dict]:
+    """English + Hindi instructions from ai4bharat/indic-instruct-data-v0.1.
+
+    Multi-turn "messages" format -- each adjacent (user, assistant) pair
+    in a conversation becomes its own single-turn training example.
+    """
+    records = []
+    for config in INDIC_CONFIGS:
+        for lang in INDIC_LANGS:
+            source_tag = f"indic_{config}_{lang}"
+            try:
+                logger.info(f"loading Indic instructions: ai4bharat/indic-instruct-data-v0.1 ({config}/{lang})")
+                ds = load_dataset("ai4bharat/indic-instruct-data-v0.1", config, split=lang)
+            except Exception as e:
+                logger.info(f"{source_tag}: skipped ({e})")
+                continue
+
+            kept = 0
+            for row in ds:
+                messages = row.get("messages", [])
+                for i in range(len(messages) - 1):
+                    if messages[i].get("role") != "user" or messages[i + 1].get("role") != "assistant":
+                        continue
+                    instruction = (messages[i].get("content") or "").strip()
+                    response = (messages[i + 1].get("content") or "").strip()
+                    if not instruction or not response:
+                        continue
+                    records.append({"prompt": _format_prompt(instruction), "response": response, "source": source_tag})
+                    kept += 1
+            logger.info(f"{source_tag}: kept {kept} pairs")
+
+    logger.info(f"Indic instructions total: kept {len(records)} pairs")
     return records
 
 
@@ -73,8 +145,8 @@ def main():
     args = parser.parse_args()
 
     all_records = load_alpaca_en()
-    # TODO: extend once Hindi/Hinglish instruction sources are picked, e.g.
-    # all_records.extend(load_hindi_instructions())
+    all_records.extend(load_dolly_en())
+    all_records.extend(load_indic_instruct())
 
     random.seed(SEED)
     random.shuffle(all_records)
