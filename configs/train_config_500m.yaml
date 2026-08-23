@@ -1,29 +1,33 @@
-# Spica AI - Training config (500M-tier, initial calibration run)
-# Same calibration-first approach as every prior tier jump: short run to
-# measure real s/step + confirm no OOM, then extend max_steps.
+# Spica AI - Training config (500M-tier, full run)
+# Calibration (5000 steps) measured 0.468s/step, no OOM/crash after the
+# pack_dataset + sampler RAM fixes. Data scaled to ~2.8B tokens (C4/mC4
+# added) before this run -- ~28.4% of Chinchilla-optimal for the 493M
+# body, a much healthier ratio than the pre-C4 683M-token corpus's 6.9%.
 #
-# batch_size=4 keeps tokens/step at 4096 (4*1024), matching the known-safe
-# scale established at every prior tier (cross_entropy's logits tensor
-# scales with batch*block_size*vocab_size regardless of model size --
-# this is what OOM'd the 10M tier at 64*256 and would OOM here far worse
-# at a careless batch size given block_size=1024).
+# max_steps=200000 (~29% of one epoch over 2.8B tokens, ~26hr at
+# 0.468s/step) -- sized to a single realistic unattended push given
+# repeated instance crashes/OOMs earlier this session, not a full epoch.
 #
-# Checkpoints at this tier are much bigger: ~687M total params * 4 bytes
-# weights (~2.75GB) + optimizer 2x (~5.5GB) ~= ~8.25GB PER FILE. Even
-# calibration's checkpoint_interval is kept sparse (2500, not 1000) to
-# avoid ~41GB of calibration-only checkpoint writes.
+# checkpoint_interval=30000 is a deliberate safety tradeoff for an
+# unattended run: checkpoints here are ~8.25GB EACH (687M total params
+# * 4 bytes weights [~2.75GB] + AdamW optimizer state 2x [~5.5GB]).
+# At interval 30000, ~6 step_*.pt files + 1 latest.pt ~= 57.75GB, safe
+# on a 100GB disk with ~26GB already used by data. Denser checkpointing
+# (e.g. 10000) would risk overflowing the disk (10 files ~= 82.5GB +
+# 26GB data > 100GB) -- disk safety was prioritized over minimizing
+# potential steps-lost-on-crash (worst case here: ~30000 steps, ~3.9hr).
 
 batch_size: 4
-max_steps: 5000          # calibration run -- extend once real s/step is known
-eval_interval: 250
+max_steps: 200000        # ~26hr at measured 0.468s/step
+eval_interval: 1000
 eval_iters: 50
-log_interval: 100
+log_interval: 1000
 
 learning_rate: 3.0e-4
 min_lr: 3.0e-5
-warmup_steps: 200
+warmup_steps: 500
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_500m"
-checkpoint_interval: 2500
+checkpoint_interval: 30000
