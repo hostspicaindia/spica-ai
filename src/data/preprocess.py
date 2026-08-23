@@ -1,18 +1,30 @@
 """
 Spica AI - Data Preprocessing Pipeline
 
-Downloads the three source datasets (English, Hindi, Hinglish), cleans them,
+Downloads the source datasets (English, Hindi, Hinglish), cleans them,
 and writes one JSONL file per language to data/cleaned/, plus a stats
 report to data/stats/preprocess_stats.json.
 
 Sources:
     English   - sentence-transformers/wikipedia-en-sentences (field: "sentence")
+              + allenai/c4, config "en"                      (field: "text")
     Hindi     - ai4bharat/IndicCorpV2, config "hin_Deva"      (field: "text")
+              + allenai/c4 (mc4 fallback), config "hi"        (field: "text")
     Hinglish  - WillHeld/hinglish_top                         (field: "cs_query")
+
+C4/mC4 were added at the 500M tier -- the original three sources are
+maxed out (English at ~90% of what's available, Hindi/Hinglish at their
+practical ceilings), and 683M pretraining tokens is only ~6.9% of
+Chinchilla-optimal (~9.9B) for a 493M-param body. C4/mC4 documents are
+full web pages, not single sentences, so they're split into paragraphs
+before the same length filter as everything else, and pulled by a
+character-volume target rather than a row count (unlike the sentence-
+count sources, since document length varies hugely).
 
 Usage:
     python -m src.data.preprocess
     python -m src.data.preprocess --limit-en 200000 --limit-hi 200000
+    python -m src.data.preprocess --limit-en-c4-chars 1700000000 --limit-hi-mc4-chars 1000000000
 """
 
 import argparse
@@ -91,6 +103,63 @@ def process_hindi(limit: int) -> list[dict]:
     return records
 
 
+def _split_into_chunks(text: str) -> list[str]:
+    """C4/mC4 rows are full documents, not single sentences -- split on
+    blank lines (paragraph breaks) so each chunk goes through the same
+    length filter (MIN/MAX_CHARS) as every other source instead of being
+    dropped outright for exceeding MAX_CHARS."""
+    return [p.strip() for p in text.split("\n") if p.strip()]
+
+
+def process_c4_en(char_limit: int) -> list[dict]:
+    """Large-scale English web text from allenai/c4, config 'en' --
+    pulled by character-volume target since C4 documents vary hugely in
+    length (unlike the sentence-level wikipedia source)."""
+    logger.info(f"loading English (C4): allenai/c4, target {char_limit:,} chars")
+    ds = load_dataset("allenai/c4", "en", split="train", streaming=True)
+
+    seen = set()
+    records = []
+    total_chars = 0
+    for row in ds:
+        if total_chars >= char_limit:
+            break
+        for para in _split_into_chunks(row["text"]):
+            text = clean_text(para)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            records.append({"text": text, "lang": "en", "source": "c4/en"})
+            total_chars += len(text)
+
+    logger.info(f"English (C4): kept {len(records)} paragraphs, {total_chars:,} chars")
+    return records
+
+
+def process_c4_hi(char_limit: int) -> list[dict]:
+    """Hindi web text from allenai/c4's multilingual mc4 config 'hi' --
+    same character-volume approach as process_c4_en."""
+    logger.info(f"loading Hindi (mC4): allenai/c4 (multilingual config), target {char_limit:,} chars")
+    ds = load_dataset("allenai/c4", "hi", split="train", streaming=True)
+
+    seen = set()
+    records = []
+    total_chars = 0
+    for row in ds:
+        if total_chars >= char_limit:
+            break
+        for para in _split_into_chunks(row["text"]):
+            text = clean_text(para)
+            if text is None or text in seen:
+                continue
+            seen.add(text)
+            records.append({"text": text, "lang": "hi", "source": "mc4/hi"})
+            total_chars += len(text)
+
+    logger.info(f"Hindi (mC4): kept {len(records)} paragraphs, {total_chars:,} chars")
+    return records
+
+
 def process_hinglish() -> list[dict]:
     logger.info("loading Hinglish: WillHeld/hinglish_top (all splits)")
     ds = load_dataset("WillHeld/hinglish_top")
@@ -113,12 +182,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit-en", type=int, default=7_000_000, help="max English sentences to keep")
     parser.add_argument("--limit-hi", type=int, default=2_000_000, help="max Hindi sentences to keep")
+    parser.add_argument(
+        "--limit-en-c4-chars", type=int, default=1_700_000_000,
+        help="target chars from C4 English (added at the 500M tier, ~1.19B tokens)",
+    )
+    parser.add_argument(
+        "--limit-hi-mc4-chars", type=int, default=1_000_000_000,
+        help="target chars from mC4 Hindi (added at the 500M tier, ~0.7B tokens)",
+    )
     args = parser.parse_args()
 
     en_records = process_english(args.limit_en)
+    en_records.extend(process_c4_en(args.limit_en_c4_chars))
     write_jsonl(en_records, CLEANED_DIR / "en.jsonl")
 
     hi_records = process_hindi(args.limit_hi)
+    hi_records.extend(process_c4_hi(args.limit_hi_mc4_chars))
     write_jsonl(hi_records, CLEANED_DIR / "hi.jsonl")
 
     hinglish_records = process_hinglish()
