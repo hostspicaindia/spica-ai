@@ -11,15 +11,39 @@ loaded fully into RAM - important once token files get large at bigger
 model tiers.
 """
 
+import random
 from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 TOKENIZED_DIR = ROOT_DIR / "data" / "tokenized"
+
+
+class RandomOffsetSampler(Sampler):
+    """Draws indices uniformly at random, one at a time, instead of
+    RandomSampler's default behavior of eagerly materializing a full
+    torch.randperm(len(dataset)) array up front. At 500M-tier scale
+    (~669M dataset items) that permutation is a ~5.35GB int64 array
+    allocated in one shot the instant iter(dataloader) runs -- exactly
+    what caused system RAM to spike immediately at training start.
+    Samples with replacement (not a true permutation), which is standard
+    practice for this kind of large-corpus pretraining loop and negligible
+    at this scale, in exchange for O(1) memory instead of O(n).
+    """
+
+    def __init__(self, data_source):
+        self.n = len(data_source)
+
+    def __iter__(self):
+        for _ in range(self.n):
+            yield random.randrange(self.n)
+
+    def __len__(self) -> int:
+        return self.n
 
 
 class TokenDataset(Dataset):
@@ -56,6 +80,13 @@ def get_dataloader(
     """
     dataset = TokenDataset(split, block_size)
     if distributed:
+        # NOTE: DistributedSampler has the same eager-torch.randperm cost as
+        # the default shuffle=True path below -- not fixed here since DDP
+        # is currently unused (abandoned for RTX 5090's lack of NVLink, see
+        # trainer.py's docstring), but would need the same treatment if
+        # revisited at a scale where it matters.
         sampler = DistributedSampler(dataset, num_replicas=world_size, rank=rank, shuffle=shuffle)
         return DataLoader(dataset, batch_size=batch_size, sampler=sampler)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    if shuffle:
+        return DataLoader(dataset, batch_size=batch_size, sampler=RandomOffsetSampler(dataset))
+    return DataLoader(dataset, batch_size=batch_size, shuffle=False)
