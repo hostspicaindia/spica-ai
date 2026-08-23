@@ -1,0 +1,30 @@
+# Spica AI - SFT (instruction-tuning) config, 100M tier
+# Same idea as sft_config.yaml (10M tier) but sized for the 100M
+# checkpoint's block_size=512 (vs 10M's 256). batch_size dropped 16 -> 8
+# to keep tokens/step at 4096 (8*512), matching the known-safe scale --
+# reusing the 10M config's batch_size=16 here OOM'd immediately (16*512=
+# 8192 tokens/step, 2x the safe scale, same class of bug as the original
+# pretraining-config OOM: cross_entropy's logits tensor scales with
+# batch*block_size*vocab_size regardless of which config it came from).
+#
+# max_steps scaled for batch8 to cover the same ~5 epochs the 10M SFT
+# used (50935 pairs / 8 ~= 6367 steps/epoch * 5 ~= 31835, rounded to 32000).
+# checkpoint_interval=8000 -> 4 files * ~2.6GB ~= 10.4GB.
+
+train_data: "data/sft/train.jsonl"
+val_data: "data/sft/val.jsonl"
+
+batch_size: 8              # matches 100M pretraining's safe scale (8*512=4096 tokens/step)
+max_steps: 32000           # ~5 epochs over 50935 pairs at batch_size 8
+eval_interval: 400
+eval_iters: 20
+log_interval: 400
+
+learning_rate: 5.0e-5      # ~6x smaller than pretraining LR -- fine-tune, don't relearn
+min_lr: 5.0e-6
+warmup_steps: 600
+weight_decay: 0.1
+grad_clip: 1.0
+
+checkpoint_dir: "checkpoints/model_100m_sft"
+checkpoint_interval: 8000
