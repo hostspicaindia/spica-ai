@@ -35,6 +35,69 @@ after `pack_dataset`) on that instance once reconnected.
 
 ---
 
+## 0.5. Quick Command Reference (exact commands used all session)
+
+### Fresh vast.ai instance setup
+```bash
+git clone https://github.com/hostspicaindia/spica-ai.git
+cd spica-ai
+pip install -r requirements.txt
+```
+
+### Regenerate pretraining data (needed on every fresh instance — data/ is gitignored)
+```bash
+python -m src.data.preprocess
+python -m src.data.pack_dataset
+```
+Defaults already reflect the 500M-tier scale-up (`--limit-en 7000000`, C4/mC4 included). Takes well over an hour at current corpus size (~2.8B tokens) — see PROGRESS.md section 2 for the memory-safety history behind this script.
+
+### Run pretraining
+```bash
+python -m src.training.trainer --model-config configs/model_<tier>.yaml --train-config configs/train_config<_tier>.yaml
+# resume after a crash/interruption:
+python -m src.training.trainer --model-config configs/model_<tier>.yaml --train-config configs/train_config<_tier>.yaml --resume checkpoints/model_<tier>/latest.pt
+```
+`<tier>` = `1m`/`10m`/`100m`/`500m`. Note the 1M tier's train config has no `_1m` suffix (`configs/train_config.yaml`), every other tier does.
+
+### Run SFT (after pretraining is done for that tier)
+```bash
+python -m src.data.prepare_sft   # only needed once, or to refresh the instruction dataset
+python -m src.training.sft_trainer --init-checkpoint checkpoints/model_<tier>/latest.pt --sft-config configs/sft_config<_tier>.yaml
+```
+10M tier uses the base `configs/sft_config.yaml` (no suffix); 100M+ needs a tier-specific one (`sft_config_100m.yaml` etc.) — **do not reuse a smaller tier's SFT config**, its `batch_size` will be wrong for a different `block_size` and can OOM (this exact mistake happened going 10M→100M).
+
+### Test a checkpoint
+```bash
+# raw pretrain completion:
+python -m src.inference.generate --checkpoint checkpoints/model_<tier>/latest.pt --prompt "Namaste, aap kaise" --max-new-tokens 80 --top-k 50
+# SFT-tuned, instruction-formatted:
+python -m src.inference.generate --checkpoint checkpoints/model_<tier>_sft/latest.pt --instruct --prompt "Explain gravity simply"
+```
+
+### Run something long unattended (survives disconnect/laptop shutdown)
+```bash
+nohup python -m src.training.trainer --model-config configs/model_<tier>.yaml --train-config configs/train_config<_tier>.yaml > /workspace/train.log 2>&1 &
+disown
+```
+Or chained (only starts training if `pack_dataset` actually succeeds):
+```bash
+nohup bash -c "python -m src.data.pack_dataset && python -m src.training.trainer --model-config configs/model_<tier>.yaml --train-config configs/train_config<_tier>.yaml" > /workspace/run.log 2>&1 &
+disown
+```
+**⚠️ Don't run the same command again afterward in the same terminal "just to check"** — this actually happened (accidentally started a second concurrent `pack_dataset` on top of the backgrounded one), doubling memory use on an already-large corpus and stalling both. After backgrounding, only use `tail -f /workspace/train.log` to watch progress, never re-invoke the command.
+
+### Back up a checkpoint (always verify with checksum, not just file size)
+```bash
+# on local machine:
+scp -P <PORT> root@<HOST>:/workspace/spica-ai/checkpoints/model_<tier>/latest.pt "/path/to/local/latest_<tier>.pt"
+# then verify:
+sha256sum "/path/to/local/latest_<tier>.pt"
+ssh -p <PORT> root@<HOST> "sha256sum /workspace/spica-ai/checkpoints/model_<tier>/latest.pt"
+# the two hashes must match exactly
+```
+
+---
+
 ## 1. Project Structure (current)
 
 ```
