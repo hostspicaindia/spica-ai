@@ -42,6 +42,13 @@ Currently implemented:
         single-turn training example (keeps the same prompt/response
         format as every other source; loses cross-turn context but keeps
         the dataset format simple and consistent).
+    Hinglish conversations -- Abhishekcr448/Hinglish-Everyday-Conversations-1M
+        (1,001,323 rows, MIT license). Closes the project's actual weakest
+        gap -- zero Hinglish SFT data existed until now (Indic-Instruct's
+        "hi" splits are pure Hindi, not code-mixed). Synthetic (GPT4o-mini
+        generated, not real conversations), so subsampled by default rather
+        than used in full -- keeps it from dominating/skewing the set
+        relative to the other, more diverse sources.
 
 Usage:
     python -m src.data.prepare_sft
@@ -156,6 +163,31 @@ def load_indic_instruct() -> list[dict]:
     return records
 
 
+def load_hinglish_conversations(sample_size: int = 200000) -> list[dict]:
+    """Synthetic Hinglish conversations from Abhishekcr448/Hinglish-Everyday-Conversations-1M.
+
+    GPT4o-mini generated, not real conversations -- subsampled (default
+    200K of the 1M available) rather than used in full to avoid this one
+    synthetic source dominating the mix.
+    """
+    logger.info("loading Hinglish conversations: Abhishekcr448/Hinglish-Everyday-Conversations-1M")
+    ds = load_dataset("Abhishekcr448/Hinglish-Everyday-Conversations-1M", split="train")
+
+    if sample_size < len(ds):
+        ds = ds.shuffle(seed=SEED).select(range(sample_size))
+
+    records = []
+    for row in ds:
+        instruction = (row.get("input") or "").strip()
+        response = (row.get("output") or "").strip()
+        if not instruction or not response:
+            continue
+        records.append({"prompt": _format_prompt(instruction), "response": response, "source": "hinglish_conversations"})
+
+    logger.info(f"Hinglish conversations: kept {len(records)} pairs")
+    return records
+
+
 IDENTITY_QUESTIONS_EN = [
     "What is your name?",
     "Who are you?",
@@ -257,11 +289,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--val-ratio", type=float, default=0.02, help="fraction held out for validation")
     parser.add_argument("--identity-oversample", type=int, default=3, help="repeat the synthetic identity Q&A this many times")
+    parser.add_argument("--hinglish-sample-size", type=int, default=200000, help="how many of the 1M Hinglish conversations to use")
     args = parser.parse_args()
 
     all_records = load_alpaca_en()
     all_records.extend(load_dolly_en())
     all_records.extend(load_indic_instruct())
+    all_records.extend(load_hinglish_conversations(sample_size=args.hinglish_sample_size))
     all_records.extend(load_identity(oversample=args.identity_oversample))
 
     random.seed(SEED)
