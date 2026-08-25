@@ -7,37 +7,46 @@
 # had changed. Not repeating that here -- verified against model_500m.yaml's
 # block_size=1024 before setting this.)
 #
-# max_steps sized for 2 EPOCHS (not 3, unlike the 100M tier) over the
-# existing 382179-pair dataset: 382179/4 ~= 95545 steps/epoch * 2 ~= 191090,
-# rounded to 191000. Deliberately fewer epochs than 100M's SFT run --
-# 500M has more capacity to memorize the same templated data, and 3 epochs
-# already showed early signs of repetition-loop overfitting at 100M scale
-# (see PROGRESS.md section 7 tier notes). Watch val_loss during the run;
-# extend from this checkpoint later if it looks underfit rather than
-# gambling on 3 epochs upfront.
+# RESCALED (2026-08-25) after the first SFT run's test results surfaced
+# two real bugs (NAME_1/NAME_2 placeholder leakage, no model identity) and
+# a real gap (zero Hinglish data) -- see PROGRESS.md. prepare_sft.py now
+# filters the leakage and adds Hinglish conversations (200K, subsampled
+# from Abhishekcr448/Hinglish-Everyday-Conversations-1M) + synthetic
+# identity Q&A (540, oversampled 3x). Actual dataset after these changes:
+# 549101 train pairs (up from 382179 -- filtering removed ~30K leaked
+# rows, adding ~200540 new ones netted this).
 #
-# At measured pretrain speed (~0.443s/step, from the 198000->199000 step
-# log interval) this is ~191000*0.443s ~= 23.5hr -- roughly matches the
-# pretrain run's own ~26hr budget.
+# max_steps still sized for 2 EPOCHS (same reasoning as before -- 500M's
+# capacity to overfit a templated set, watch val_loss rather than assume
+# 3 epochs is safe): 549101/4 ~= 137275 steps/epoch * 2 ~= 274550.
+# warmup_steps scaled proportionally from the original run's ratio
+# (3000/191000 ~= 1.57%) -> 274550*0.0157 ~= 4300.
 #
-# checkpoint_interval=25000 -> ceil(191000/25000)=8 step_*.pt files +
-# 1 latest.pt = 9 files. Checkpoints at this tier are ~8.25GB EACH (same
-# model size as pretrain: ~2.75GB weights + ~5.5GB fresh AdamW optimizer
-# state) -> ~74.25GB. Check free disk before starting if the base
-# pretrain checkpoint(s) are still sitting on the same instance.
+# At the first SFT run's measured rate (~0.41s/step) this is
+# ~274550*0.41s ~= 31.3hr. This instance's DLPerf benchmark is ~10% lower
+# than the one that ran the first SFT (178.0 vs 198.9, QEMU-virtualized
+# RTX5090 vs bare-metal) -- actual per-step time may run a bit slower,
+# recalibrate off the first few hundred steps' logged elapsed time rather
+# than trusting this estimate blindly.
+#
+# checkpoint_interval=25000 -> ceil(274550/25000)=11 step_*.pt files +
+# 1 latest.pt = 12 files * ~8.25GB = ~99GB. This instance has 250GB disk,
+# still safe, but don't let old step_*.pt files pile up uninspected --
+# same backup-then-delete discipline as before once a checkpoint is
+# verified safely backed up locally.
 
 train_data: "data/sft/train.jsonl"
 val_data: "data/sft/val.jsonl"
 
 batch_size: 4               # matches 500M's safe scale (4*1024=4096 tokens/step)
-max_steps: 191000           # ~2 epochs over 382179 pairs at batch_size 4
+max_steps: 274550           # ~2 epochs over 549101 pairs at batch_size 4
 eval_interval: 1500
 eval_iters: 20
 log_interval: 1500
 
 learning_rate: 5.0e-5        # ~6x smaller than pretraining LR -- fine-tune, don't relearn
 min_lr: 5.0e-6
-warmup_steps: 3000
+warmup_steps: 4300
 weight_decay: 0.1
 grad_clip: 1.0
 
