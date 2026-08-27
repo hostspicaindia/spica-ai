@@ -55,6 +55,16 @@ Currently implemented:
         generated, not real conversations), so subsampled by default rather
         than used in full -- keeps it from dominating/skewing the set
         relative to the other, more diverse sources.
+    Arithmetic -- synthetic, programmatically generated (add/subtract/
+        multiply/exact-divide over small numbers). The 500M-tier v2
+        checkpoint couldn't reliably answer "2+2" even with repetition_penalty
+        fixing the degenerate-loop symptom -- the underlying fact just isn't
+        well-learned. Same cross-product idea as Identity (question template
+        x answer template, per number pair) for phrasing variety without
+        literal duplicate text, but here each pair also carries a distinct
+        correct number, so this teaches specific facts more than the
+        operation itself -- expect memorization of common small sums, not
+        real arithmetic generalization (that needs a much bigger model).
 
 Usage:
     python -m src.data.prepare_sft
@@ -218,6 +228,109 @@ def load_hinglish_conversations(sample_size: int = 200000) -> list[dict]:
     return records
 
 
+ADD_Q_TEMPLATES = [
+    "What is {a}+{b}?",
+    "What is {a} plus {b}?",
+    "Calculate {a} + {b}.",
+    "Add {a} and {b}.",
+]
+ADD_A_TEMPLATES = [
+    "{a} + {b} = {c}.",
+    "The answer is {c}.",
+    "{a} plus {b} equals {c}.",
+    "{a} + {b} is {c}.",
+]
+
+SUB_Q_TEMPLATES = [
+    "What is {a}-{b}?",
+    "What is {a} minus {b}?",
+    "Calculate {a} - {b}.",
+    "Subtract {b} from {a}.",
+]
+SUB_A_TEMPLATES = [
+    "{a} - {b} = {c}.",
+    "The answer is {c}.",
+    "{a} minus {b} equals {c}.",
+    "{a} - {b} is {c}.",
+]
+
+MUL_Q_TEMPLATES = [
+    "What is {a}*{b}?",
+    "What is {a} times {b}?",
+    "Calculate {a} x {b}.",
+    "Multiply {a} and {b}.",
+]
+MUL_A_TEMPLATES = [
+    "{a} * {b} = {c}.",
+    "The answer is {c}.",
+    "{a} times {b} equals {c}.",
+    "{a} multiplied by {b} is {c}.",
+]
+
+DIV_Q_TEMPLATES = [
+    "What is {a}/{b}?",
+    "What is {a} divided by {b}?",
+    "Calculate {a} / {b}.",
+    "Divide {a} by {b}.",
+]
+DIV_A_TEMPLATES = [
+    "{a} / {b} = {c}.",
+    "The answer is {c}.",
+    "{a} divided by {b} equals {c}.",
+    "{a} / {b} is {c}.",
+]
+
+
+def load_arithmetic(oversample: int = 2) -> list[dict]:
+    """Synthetic add/subtract/multiply/exact-divide facts -- see module docstring."""
+    records = []
+
+    for a in range(0, 21):
+        for b in range(0, 21):
+            c = a + b
+            for q_tmpl, a_tmpl in zip(ADD_Q_TEMPLATES, ADD_A_TEMPLATES):
+                records.append({
+                    "prompt": _format_prompt(q_tmpl.format(a=a, b=b)),
+                    "response": a_tmpl.format(a=a, b=b, c=c),
+                    "source": "arithmetic_add",
+                })
+
+    for a in range(0, 21):
+        for b in range(0, a + 1):  # b <= a, keeps results non-negative
+            c = a - b
+            for q_tmpl, a_tmpl in zip(SUB_Q_TEMPLATES, SUB_A_TEMPLATES):
+                records.append({
+                    "prompt": _format_prompt(q_tmpl.format(a=a, b=b)),
+                    "response": a_tmpl.format(a=a, b=b, c=c),
+                    "source": "arithmetic_sub",
+                })
+
+    for a in range(0, 13):
+        for b in range(0, 13):
+            c = a * b
+            for q_tmpl, a_tmpl in zip(MUL_Q_TEMPLATES, MUL_A_TEMPLATES):
+                records.append({
+                    "prompt": _format_prompt(q_tmpl.format(a=a, b=b)),
+                    "response": a_tmpl.format(a=a, b=b, c=c),
+                    "source": "arithmetic_mul",
+                })
+
+    for b in range(1, 13):  # avoid division by zero
+        for k in range(1, 13):
+            a = b * k  # exact division only -- no remainders to explain
+            for q_tmpl, a_tmpl in zip(DIV_Q_TEMPLATES, DIV_A_TEMPLATES):
+                records.append({
+                    "prompt": _format_prompt(q_tmpl.format(a=a, b=b)),
+                    "response": a_tmpl.format(a=a, b=b, c=k),
+                    "source": "arithmetic_div",
+                })
+
+    base_count = len(records)
+    records = records * max(1, oversample)
+    logger.info(f"arithmetic: {base_count} unique facts, oversampled {oversample}x -> {len(records)} total")
+    return records
+
+
 IDENTITY_QUESTIONS_EN = [
     "What is your name?",
     "Who are you?",
@@ -320,6 +433,7 @@ def main():
     parser.add_argument("--val-ratio", type=float, default=0.02, help="fraction held out for validation")
     parser.add_argument("--identity-oversample", type=int, default=50, help="repeat the synthetic identity Q&A this many times")
     parser.add_argument("--hinglish-sample-size", type=int, default=200000, help="how many of the 1M Hinglish conversations to use")
+    parser.add_argument("--arithmetic-oversample", type=int, default=2, help="repeat the synthetic arithmetic facts this many times")
     args = parser.parse_args()
 
     all_records = load_alpaca_en()
@@ -327,6 +441,7 @@ def main():
     all_records.extend(load_indic_instruct())
     all_records.extend(load_hinglish_conversations(sample_size=args.hinglish_sample_size))
     all_records.extend(load_identity(oversample=args.identity_oversample))
+    all_records.extend(load_arithmetic(oversample=args.arithmetic_oversample))
 
     random.seed(SEED)
     random.shuffle(all_records)
