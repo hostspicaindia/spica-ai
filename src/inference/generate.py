@@ -64,7 +64,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument(
-        "--repetition-penalty", type=float, default=1.0,
+        "--repetition-penalty", type=float, default=1.3,
         help="discourage repeating already-generated tokens (try 1.2-1.3 to fight repetition loops; 1.0 = off)",
     )
     parser.add_argument(
