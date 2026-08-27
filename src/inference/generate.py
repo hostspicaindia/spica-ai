@@ -64,6 +64,10 @@ def main():
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-k", type=int, default=50)
     parser.add_argument(
+        "--repetition-penalty", type=float, default=1.0,
+        help="discourage repeating already-generated tokens (try 1.2-1.3 to fight repetition loops; 1.0 = off)",
+    )
+    parser.add_argument(
         "--instruct", action="store_true",
         help="wrap prompt in the SFT instruction template (use with an SFT checkpoint)",
     )
@@ -86,6 +90,7 @@ def main():
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         top_k=args.top_k,
+        repetition_penalty=args.repetition_penalty,
     )
     text = tokenizer.decode(out[0].tolist())
 

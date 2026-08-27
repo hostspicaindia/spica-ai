@@ -74,11 +74,22 @@ class GPT(nn.Module):
         max_new_tokens: int,
         temperature: float = 1.0,
         top_k: int = None,
+        repetition_penalty: float = 1.0,
     ) -> torch.Tensor:
         for _ in range(max_new_tokens):
             idx_cond = idx if idx.size(1) <= self.block_size else idx[:, -self.block_size:]
             logits, _ = self(idx_cond)
             logits = logits[:, -1, :] / temperature
+
+            if repetition_penalty != 1.0:
+                # standard CTRL-style penalty: shrink logits of tokens
+                # already seen in this sequence toward zero, discouraging
+                # (not forbidding) picking them again. Positive logits are
+                # divided, negative ones multiplied, so the penalty always
+                # pushes the score down regardless of sign.
+                seen_logits = torch.gather(logits, 1, idx)
+                seen_logits = torch.where(seen_logits < 0, seen_logits * repetition_penalty, seen_logits / repetition_penalty)
+                logits.scatter_(1, idx, seen_logits)
 
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
