@@ -19,8 +19,14 @@ pattern as src/data/preprocess.py's per-language loaders.
         answer) pairs. English/Hindi/Hinglish question phrasings crossed
         with several answer phrasings each (not literal duplicates -- real
         paraphrase variety, safer against reinforcing a repetition-loop
-        than copy-pasting one exact string). Oversampled (default 3x) since
-        it's a tiny fraction of the full set and needs to actually stick.
+        than copy-pasting one exact string).
+        v2 (2026-08-27): the first fix's 3x oversample (540 pairs) still
+        lost to lm_sys's real chat logs on volume alone (161K pairs, many
+        containing real chatbots naming themselves) -- the checkpoint
+        answered "I'm Garuda 1" only inconsistently, sometimes "I'm Vicuna,
+        trained by LMSYS" instead. Fixed two ways: AI_IDENTITY_LEAK_RE now
+        drops any Indic-Instruct row where another AI/company names itself
+        as speaker, and oversample raised 3x -> 50x (9000 pairs).
 
 Currently implemented:
     English instruction-following -- tatsu-lab/alpaca (52,002 examples)
@@ -80,6 +86,23 @@ INDIC_LANGS = ["en", "hi"]
 # ("My name is NAME_1"). Drop any row that contains one rather than
 # training on it.
 NAME_PLACEHOLDER_RE = re.compile(r"\bNAME_\d+\b")
+
+# lm_sys (real ChatGPT/Vicuna/etc. conversation logs) and oasst1 contain
+# real chatbots stating THEIR name/maker -- the 500M-tier v2 SFT checkpoint
+# picked this up and answered "I'm Garuda 1" only inconsistently, sometimes
+# answering "I'm Vicuna, trained by LMSYS" instead (161K lm_sys pairs vs
+# 540 identity pairs -- no contest). Drop rows naming a specific other
+# AI/company as speaker rather than trying to out-volume them.
+AI_IDENTITY_LEAK_RE = re.compile(
+    r"\b(Vicuna|ChatGPT|GPT-?3(\.5)?|GPT-?4|LMSYS|OpenAI|Google('s)? (Bard|Gemini)|Bard|Meta('s)? (LLaMA|Llama)|Anthropic|trained by (Google|Meta|OpenAI))\b",
+    re.IGNORECASE,
+)
+
+# lm_sys alone is 161K of the ~292K Indic-Instruct pairs (55%) -- its sheer
+# volume is what drowned out the identity data above. Cap it post-filter so
+# the rest of the mix (identity, general instructions, other Indic sources)
+# isn't a rounding error next to one chat-log dump.
+LM_SYS_CAP_PER_LANG = 20000
 
 
 def _format_prompt(instruction: str, extra_input: str = "") -> str:
@@ -143,7 +166,7 @@ def load_indic_instruct() -> list[dict]:
                 logger.info(f"{source_tag}: skipped ({e})")
                 continue
 
-            kept = 0
+            config_records = []
             for row in ds:
                 messages = row.get("messages", [])
                 for i in range(len(messages) - 1):
@@ -155,9 +178,16 @@ def load_indic_instruct() -> list[dict]:
                         continue
                     if NAME_PLACEHOLDER_RE.search(instruction) or NAME_PLACEHOLDER_RE.search(response):
                         continue
-                    records.append({"prompt": _format_prompt(instruction), "response": response, "source": source_tag})
-                    kept += 1
-            logger.info(f"{source_tag}: kept {kept} pairs")
+                    if AI_IDENTITY_LEAK_RE.search(instruction) or AI_IDENTITY_LEAK_RE.search(response):
+                        continue
+                    config_records.append({"prompt": _format_prompt(instruction), "response": response, "source": source_tag})
+
+            if config == "lm_sys" and len(config_records) > LM_SYS_CAP_PER_LANG:
+                random.seed(SEED)
+                config_records = random.sample(config_records, LM_SYS_CAP_PER_LANG)
+
+            records.extend(config_records)
+            logger.info(f"{source_tag}: kept {len(config_records)} pairs")
 
     logger.info(f"Indic instructions total: kept {len(records)} pairs")
     return records
@@ -259,7 +289,7 @@ IDENTITY_ANSWERS_HINGLISH = [
 ]
 
 
-def load_identity(oversample: int = 3) -> list[dict]:
+def load_identity(oversample: int = 50) -> list[dict]:
     """Synthetic identity Q&A -- see module docstring for why this exists."""
     groups = [
         (IDENTITY_QUESTIONS_EN, IDENTITY_ANSWERS_EN, "identity_en"),
@@ -288,7 +318,7 @@ def write_jsonl(records: list[dict], out_path: Path) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--val-ratio", type=float, default=0.02, help="fraction held out for validation")
-    parser.add_argument("--identity-oversample", type=int, default=3, help="repeat the synthetic identity Q&A this many times")
+    parser.add_argument("--identity-oversample", type=int, default=50, help="repeat the synthetic identity Q&A this many times")
     parser.add_argument("--hinglish-sample-size", type=int, default=200000, help="how many of the 1M Hinglish conversations to use")
     args = parser.parse_args()
 
