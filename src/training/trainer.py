@@ -16,6 +16,12 @@ batch_size in the train config is PER GPU under DDP -- effective global
 batch size is batch_size * nproc_per_node. Not yet tested on real
 multi-GPU hardware -- verify with a short run before trusting it for a
 long paid one, same as any other config/tier change.
+
+Add --amp for bf16 mixed precision (~1.5-2.5x faster on Tensor Core GPUs,
+RTX5090 included) -- resuming a checkpoint saved WITHOUT --amp into a run
+WITH it (or vice versa) is safe, since checkpoints always store fp32
+master weights/optimizer state regardless; --amp only changes the forward
+pass's compute dtype, not what's saved.
 """
 
 import argparse
@@ -70,7 +76,7 @@ def build_model(model_cfg) -> GPT:
 
 
 @torch.no_grad()
-def estimate_val_loss(model, val_loader, eval_iters: int, device: str) -> float:
+def estimate_val_loss(model, val_loader, eval_iters: int, device: str, use_amp: bool = False) -> float:
     model.eval()
     losses = []
     val_iter = iter(val_loader)
@@ -81,7 +87,8 @@ def estimate_val_loss(model, val_loader, eval_iters: int, device: str) -> float:
             val_iter = iter(val_loader)
             x, y = next(val_iter)
         x, y = x.to(device), y.to(device)
-        _, loss = model(x, y)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_amp):
+            _, loss = model(x, y)
         losses.append(loss.item())
     model.train()
     return sum(losses) / len(losses)
@@ -92,6 +99,13 @@ def main():
     parser.add_argument("--model-config", default="configs/model_1m.yaml")
     parser.add_argument("--train-config", default="configs/train_config.yaml")
     parser.add_argument("--resume", default=None, help="checkpoint path to resume training from")
+    parser.add_argument(
+        "--amp", action="store_true",
+        help="bf16 mixed precision on Tensor Cores (~1.5-2.5x faster on RTX5090/A100/H100). "
+             "bf16 needs no loss-scaling (unlike fp16 -- same exponent range as fp32), but this is "
+             "the first run using it on this codebase: verify a short run's loss curve looks sane "
+             "before trusting it for a long one.",
+    )
     args = parser.parse_args()
 
     model_cfg = load_config(args.model_config)
@@ -99,8 +113,16 @@ def main():
 
     is_distributed, rank, local_rank, world_size, device = setup_distributed()
     is_main = rank == 0
+    use_amp = args.amp and device.startswith("cuda")
+    if device.startswith("cuda"):
+        # TF32 speeds up any fp32 matmul that falls outside the autocast
+        # region (or all of them, if --amp is off) -- safe and free on
+        # Ampere+ (RTX5090 included), negligible precision cost, no
+        # loss-scaling or code-shape changes needed unlike fp16.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     if is_main:
-        logger.info(f"device: {device}  distributed: {is_distributed}  world_size: {world_size}")
+        logger.info(f"device: {device}  distributed: {is_distributed}  world_size: {world_size}  amp(bf16): {use_amp}")
 
     # build on the raw (unwrapped) model first -- checkpoint save/load always
     # targets this reference, never the DDP wrapper, so state_dict keys stay
@@ -148,7 +170,8 @@ def main():
             x, y = next(train_iter)
         x, y = x.to(device), y.to(device)
 
-        _, loss = model(x, y)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_amp):
+            _, loss = model(x, y)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(raw_model.parameters(), train_cfg.grad_clip)
@@ -162,7 +185,7 @@ def main():
             # under DDP each rank evaluates its own val shard -- rank0's
             # logged number is an approximation (smaller/noisier sample),
             # not a full-val-set average, but good enough to track trend
-            val_loss = estimate_val_loss(model, val_loader, train_cfg.eval_iters, device)
+            val_loss = estimate_val_loss(model, val_loader, train_cfg.eval_iters, device, use_amp)
             if is_main:
                 logger.info(f"step {step:5d} | val_loss {val_loss:.4f}")
 
