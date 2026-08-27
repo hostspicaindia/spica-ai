@@ -9,44 +9,45 @@
 #
 # RESCALED (2026-08-25) after the first SFT run's test results surfaced
 # two real bugs (NAME_1/NAME_2 placeholder leakage, no model identity) and
-# a real gap (zero Hinglish data) -- see PROGRESS.md. prepare_sft.py now
-# filters the leakage and adds Hinglish conversations (200K, subsampled
-# from Abhishekcr448/Hinglish-Everyday-Conversations-1M) + synthetic
-# identity Q&A (540, oversampled 3x). Actual dataset after these changes:
-# 549101 train pairs (up from 382179 -- filtering removed ~30K leaked
-# rows, adding ~200540 new ones netted this).
+# a real gap (zero Hinglish data) -- see PROGRESS.md. Dataset grew to
+# 549101 pairs at that point.
 #
-# max_steps still sized for 2 EPOCHS (same reasoning as before -- 500M's
-# capacity to overfit a templated set, watch val_loss rather than assume
-# 3 epochs is safe): 549101/4 ~= 137275 steps/epoch * 2 ~= 274550.
-# warmup_steps scaled proportionally from the original run's ratio
-# (3000/191000 ~= 1.57%) -> 274550*0.0157 ~= 4300.
+# RESCALED AGAIN (2026-08-27) after that run's own test results showed
+# identity still inconsistent (lm_sys's 161K real chat logs drowned the
+# 540-pair identity set) plus arithmetic and general factual recall got
+# WORSE (diluted by the 44% dataset growth at the same 2 epochs). Fixed in
+# prepare_sft.py: lm_sys capped at 20K pairs/language (was ~161K combined),
+# identity oversampled 50x instead of 3x (9000 pairs), and a new synthetic
+# arithmetic set added (7880 pairs). Net effect: dataset SHRANK to 445754
+# train pairs despite adding two new sources, because the lm_sys cut was
+# bigger than what got added.
 #
-# At the first SFT run's measured rate (~0.41s/step) this is
-# ~274550*0.41s ~= 31.3hr. This instance's DLPerf benchmark is ~10% lower
-# than the one that ran the first SFT (178.0 vs 198.9, QEMU-virtualized
-# RTX5090 vs bare-metal) -- actual per-step time may run a bit slower,
-# recalibrate off the first few hundred steps' logged elapsed time rather
-# than trusting this estimate blindly.
+# max_steps still sized for 2 EPOCHS: 445754/4 ~= 111438 steps/epoch * 2
+# ~= 222876. warmup_steps scaled proportionally from the same ~1.57% ratio
+# used the last two rescales -> 222876*0.0157 ~= 3500.
 #
-# checkpoint_interval=25000 -> ceil(274550/25000)=11 step_*.pt files +
-# 1 latest.pt = 12 files * ~8.25GB = ~99GB. This instance has 250GB disk,
-# still safe, but don't let old step_*.pt files pile up uninspected --
-# same backup-then-delete discipline as before once a checkpoint is
+# At the second run's measured rate (~0.52-0.54s/step, this instance) this
+# is ~222876*0.53s ~= 32.8hr -- similar to before despite fewer steps,
+# since per-step time crept up over that run (0.41s early -> 0.54s late).
+# Recalibrate off the first few hundred steps' logged elapsed time.
+#
+# checkpoint_interval=25000 -> ceil(222876/25000)=9 step_*.pt files +
+# 1 latest.pt = 10 files * ~8.25GB = ~82.5GB. Safe on this instance's
+# 250GB disk. Same backup-then-delete discipline once a checkpoint is
 # verified safely backed up locally.
 
 train_data: "data/sft/train.jsonl"
 val_data: "data/sft/val.jsonl"
 
 batch_size: 4               # matches 500M's safe scale (4*1024=4096 tokens/step)
-max_steps: 274550           # ~2 epochs over 549101 pairs at batch_size 4
+max_steps: 222876           # ~2 epochs over 445754 pairs at batch_size 4
 eval_interval: 1500
 eval_iters: 20
 log_interval: 1500
 
 learning_rate: 5.0e-5        # ~6x smaller than pretraining LR -- fine-tune, don't relearn
 min_lr: 5.0e-6
-warmup_steps: 4300
+warmup_steps: 3500
 weight_decay: 0.1
 grad_clip: 1.0
 
