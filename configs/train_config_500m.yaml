@@ -8,34 +8,60 @@
 # 0.468s/step) -- sized to a single realistic unattended push given
 # repeated instance crashes/OOMs earlier this session, not a full epoch.
 #
-# checkpoint_interval=30000 is a deliberate safety tradeoff for an
-# unattended run: checkpoints here are ~8.25GB EACH (687M total params
-# * 4 bytes weights [~2.75GB] + AdamW optimizer state 2x [~5.5GB]).
-# At interval 30000, ~6 step_*.pt files + 1 latest.pt ~= 57.75GB, safe
-# on a 100GB disk with ~26GB already used by data. Denser checkpointing
-# (e.g. 10000) would risk overflowing the disk (10 files ~= 82.5GB +
-# 26GB data > 100GB) -- disk safety was prioritized over minimizing
-# potential steps-lost-on-crash (worst case here: ~30000 steps, ~3.9hr).
+# FULL RESCALE (2026-08-28) after the 5000-step calibration (--amp
+# --compile together, first time) came back clean: no crash, sane loss,
+# 0.1837s/step measured (~2.4-2.55x the original 0.443-0.468s/step fp32
+# rate). Checked GPU utilization mid-run too before deciding whether a
+# bigger batch_size was worth adding on top: 95% GPU util, 23.8/32.6GB
+# VRAM used -- already compute-bound, not memory- or data-loading-bound,
+# so a bigger batch wouldn't meaningfully help and would be an untested
+# variable to stack right before the most expensive run yet. Left at
+# batch_size=4; worth revisiting for the 1B tier or a future round.
 #
-# TEMPORARY (2026-08-28): bumped 200000 -> 205000 for a 5000-step
-# calibration run on the scaled-up (60%-Chinchilla-optimal) corpus with
-# --amp --compile, both used together for the first time. The existing
-# checkpoint IS at step 200000 (max_steps), so resuming without raising
-# this first would loop zero times. Recalculate to the real target
-# once pack_dataset.py confirms the new corpus's actual token count,
-# same as every prior data-scale-up in this project.
+# pack_dataset.py confirmed the scaled-up corpus's real size: 3,905,659,208
+# train tokens (not the ~5.92B chars-per-token estimate used when picking
+# the preprocess.py character targets -- real chars/token for this mix
+# came out to ~2.148, not the ~1.446 assumed, so actual Chinchilla-ratio
+# is ~39.6% of the 493M body's ~9.87B-token optimum, not the 60% aimed
+# for -- still a real jump from the original 28.4%, and a repeat
+# preprocessing pass to close the gap wasn't judged worth another
+# ~2hr+ cycle given diminishing returns already discussed).
+#
+# max_steps sized for one full pass over this new corpus: 3,905,659,208 /
+# 4096 tokens-per-step ~= 953,613 steps. Checkpoint is already at step
+# 205000 (from calibration), so the loop's absolute end is
+# 205000 + 953613 = 1,158,613.
+#
+# lr_max_steps=953613 (not max_steps) is the key fix from this rescale --
+# see the code comment in trainer.py's training loop for why: get_lr() is
+# now called with (step - start_step), so this resumed run gets its own
+# fresh 0-relative warmup+decay curve sized to ITS OWN step budget,
+# instead of the raw global step counter jumping the LR toward whatever
+# the OLD 200000-step schedule's tail (or head) happened to be at that
+# point -- a discontinuity Adam's existing moment estimates aren't
+# tuned for. warmup_steps=3000 (~0.3% of the new phase, similar fraction
+# to the original 500/200000) gives a short, gentle re-ramp before the
+# long cosine decay. learning_rate/min_lr unchanged -- continuing
+# pretraining, not starting a new regime.
+#
+# checkpoint_interval=50000 -> a snapshot every ~50000*0.1837s ~= 2.55hr.
+# At ~8.25GB each this is safe on the 208GB free disk (post-cleanup) if
+# backed-up-then-deleted periodically during the run, same discipline
+# as every prior long run in this project -- not meant to let all ~19
+# potential snapshots pile up simultaneously (that would be ~157GB).
 
 batch_size: 4
-max_steps: 205000        # TEMP: 200000 + 5000-step calibration only
+max_steps: 1158613       # 205000 (already done) + 953613 (1 epoch over new 3.906B-token corpus)
+lr_max_steps: 953613     # phase-relative LR schedule length (see comment above)
 eval_interval: 1000
 eval_iters: 50
 log_interval: 1000
 
 learning_rate: 3.0e-4
 min_lr: 3.0e-5
-warmup_steps: 500
+warmup_steps: 3000
 weight_decay: 0.1
 grad_clip: 1.0
 
 checkpoint_dir: "checkpoints/model_500m"
-checkpoint_interval: 30000
+checkpoint_interval: 50000

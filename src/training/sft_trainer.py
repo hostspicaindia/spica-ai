@@ -153,8 +153,15 @@ def main():
     model.train()
     t0 = time.time()
 
+    # lr_max_steps (optional, defaults to max_steps) -- see trainer.py's
+    # identical pattern for why: sizes warmup+decay relative to THIS run's
+    # own step budget so a --resume that extends past the original
+    # schedule's max_steps gets a fresh 0-relative curve instead of a
+    # sudden LR jump/discontinuity Adam's state isn't tuned for.
+    lr_max_steps = getattr(train_cfg, "lr_max_steps", train_cfg.max_steps)
+
     for step in range(start_step, train_cfg.max_steps):
-        lr = get_lr(step, train_cfg.warmup_steps, train_cfg.max_steps, train_cfg.learning_rate, train_cfg.min_lr)
+        lr = get_lr(step - start_step, train_cfg.warmup_steps, lr_max_steps, train_cfg.learning_rate, train_cfg.min_lr)
         for group in optimizer.param_groups:
             group["lr"] = lr
 

@@ -179,8 +179,22 @@ def main():
     model.train()
     t0 = time.time()
 
+    # lr_max_steps (optional config field, defaults to max_steps) sizes the
+    # warmup+decay curve relative to THIS run's own step budget rather than
+    # the absolute/global step counter. Matters when --resume continues past
+    # an earlier schedule's own max_steps (e.g. extending training onto a
+    # newly-scaled-up corpus): without this, get_lr() would see the resumed
+    # `step` as already deep into decay from the OLD schedule and jump LR
+    # straight toward the OLD min_lr's neighborhood -- or, if max_steps was
+    # simply raised, jump LR back up toward peak almost instantly (step is
+    # already large relative to the new warmup_steps) -- either way a sudden
+    # discontinuity Adam's existing moment estimates aren't tuned for. Using
+    # `step - start_step` instead makes the resumed run see its own fresh
+    # 0-relative warmup+decay, same shape a brand-new run would get, no jump.
+    lr_max_steps = getattr(train_cfg, "lr_max_steps", train_cfg.max_steps)
+
     for step in range(start_step, train_cfg.max_steps):
-        lr = get_lr(step, train_cfg.warmup_steps, train_cfg.max_steps, train_cfg.learning_rate, train_cfg.min_lr)
+        lr = get_lr(step - start_step, train_cfg.warmup_steps, lr_max_steps, train_cfg.learning_rate, train_cfg.min_lr)
         for group in optimizer.param_groups:
             group["lr"] = lr
 
