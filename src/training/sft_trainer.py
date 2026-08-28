@@ -121,7 +121,7 @@ def main():
 
     init_path = args.resume if args.resume else args.init_checkpoint
     model, model_cfg = build_model_from_checkpoint(init_path, device)
-    optimizer = build_optimizer(model, train_cfg.learning_rate, train_cfg.weight_decay)
+    optimizer = build_optimizer(model, train_cfg.learning_rate, train_cfg.weight_decay, fused=(device == "cuda"))
 
     start_step = 0
     if args.resume:

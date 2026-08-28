@@ -10,7 +10,7 @@ GPT-2 practice.
 import torch
 
 
-def build_optimizer(model, learning_rate: float, weight_decay: float, betas=(0.9, 0.95)):
+def build_optimizer(model, learning_rate: float, weight_decay: float, betas=(0.9, 0.95), fused: bool = False):
     decay_params = []
     no_decay_params = []
 
@@ -26,4 +26,8 @@ def build_optimizer(model, learning_rate: float, weight_decay: float, betas=(0.9
         {"params": decay_params, "weight_decay": weight_decay},
         {"params": no_decay_params, "weight_decay": 0.0},
     ]
-    return torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas)
+    # fused=True runs the optimizer.step() update as a single CUDA kernel
+    # instead of per-parameter Python-level ops -- free speedup, no accuracy
+    # tradeoff. CUDA-only: callers must pass fused=False on CPU (fused=True
+    # with CPU params raises, it does not silently fall back).
+    return torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, fused=fused)

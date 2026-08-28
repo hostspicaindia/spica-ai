@@ -151,7 +151,7 @@ def main():
     if args.compile and is_main:
         logger.info("torch.compile enabled -- first step will be slow (one-time trace+compile)")
     model = DDP(compiled_model, device_ids=[local_rank]) if is_distributed else compiled_model
-    optimizer = build_optimizer(model, train_cfg.learning_rate, train_cfg.weight_decay)
+    optimizer = build_optimizer(model, train_cfg.learning_rate, train_cfg.weight_decay, fused=device.startswith("cuda"))
 
     start_step = 0
     if args.resume:
