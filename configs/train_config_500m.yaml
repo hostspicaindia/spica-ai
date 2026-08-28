@@ -16,9 +16,17 @@
 # (e.g. 10000) would risk overflowing the disk (10 files ~= 82.5GB +
 # 26GB data > 100GB) -- disk safety was prioritized over minimizing
 # potential steps-lost-on-crash (worst case here: ~30000 steps, ~3.9hr).
+#
+# TEMPORARY (2026-08-28): bumped 200000 -> 205000 for a 5000-step
+# calibration run on the scaled-up (60%-Chinchilla-optimal) corpus with
+# --amp --compile, both used together for the first time. The existing
+# checkpoint IS at step 200000 (max_steps), so resuming without raising
+# this first would loop zero times. Recalculate to the real target
+# once pack_dataset.py confirms the new corpus's actual token count,
+# same as every prior data-scale-up in this project.
 
 batch_size: 4
-max_steps: 200000        # ~26hr at measured 0.468s/step
+max_steps: 205000        # TEMP: 200000 + 5000-step calibration only
 eval_interval: 1000
 eval_iters: 50
 log_interval: 1000
