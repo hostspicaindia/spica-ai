@@ -8,6 +8,7 @@ report to data/stats/preprocess_stats.json.
 Sources:
     English   - sentence-transformers/wikipedia-en-sentences (field: "sentence")
               + allenai/c4, config "en"                      (field: "text")
+              + HuggingFaceTB/cosmopedia (optional, 0 by default) (field: "text")
     Hindi     - ai4bharat/IndicCorpV2, config "hin_Deva"      (field: "text")
               + allenai/c4 (mc4 fallback), config "hi"        (field: "text")
     Hinglish  - WillHeld/hinglish_top                         (field: "cs_query")
@@ -21,10 +22,16 @@ before the same length filter as everything else, and pulled by a
 character-volume target rather than a row count (unlike the sentence-
 count sources, since document length varies hugely).
 
+Cosmopedia added when pushing toward 60% of Chinchilla-optimal (2026-08-28):
+synthetic textbook/educational text, denser factual signal per token than
+raw C4 web text -- SmolLM (135M-1.7B, this project's exact scale range)
+trained on it and beat TinyLlama-1.1B. English-only (no Hindi equivalent
+found), so it supplements C4 rather than replacing it.
+
 Usage:
     python -m src.data.preprocess
     python -m src.data.preprocess --limit-en 200000 --limit-hi 200000
-    python -m src.data.preprocess --limit-en-c4-chars 1700000000 --limit-hi-mc4-chars 1000000000
+    python -m src.data.preprocess --limit-en-c4-chars 1700000000 --limit-hi-mc4-chars 1000000000 --limit-cosmopedia-chars 1679000000
 """
 
 import argparse
@@ -160,6 +167,43 @@ def process_c4_hi(char_limit: int) -> list[dict]:
     return records
 
 
+# Prioritized textbook-like subsets first (denser factual signal), narrative
+# ones last -- pulled in this order until char_limit is hit, so a smaller
+# budget still favors the more educational content over generic web-style text.
+COSMOPEDIA_SUBSETS = ["openstax", "stanford", "khanacademy", "wikihow", "auto_math_text", "stories", "web_samples_v1"]
+
+
+def process_cosmopedia(char_limit: int) -> list[dict]:
+    """Synthetic textbook/educational English text from HuggingFaceTB/cosmopedia
+    (Mixtral-8x7B generated, Apache 2.0). Denser factual/coherent signal per
+    token than raw C4 web text -- proven at this project's exact scale range
+    by SmolLM (135M-1.7B params trained on this corpus, beat TinyLlama-1.1B).
+    Entries are full textbook/article-length, same paragraph-split-then-filter
+    approach as C4/mC4 (a raw entry would otherwise just exceed MAX_CHARS and
+    get dropped whole)."""
+    seen = set()
+    records = []
+    total_chars = 0
+    for subset in COSMOPEDIA_SUBSETS:
+        if total_chars >= char_limit:
+            break
+        logger.info(f"loading English (Cosmopedia/{subset}), {char_limit - total_chars:,} chars remaining")
+        ds = load_dataset("HuggingFaceTB/cosmopedia", subset, split="train", streaming=True)
+        for row in ds:
+            if total_chars >= char_limit:
+                break
+            for para in _split_into_chunks(row["text"]):
+                text = clean_text(para)
+                if text is None or text in seen:
+                    continue
+                seen.add(text)
+                records.append({"text": text, "lang": "en", "source": f"cosmopedia/{subset}"})
+                total_chars += len(text)
+
+    logger.info(f"English (Cosmopedia): kept {len(records)} paragraphs, {total_chars:,} chars")
+    return records
+
+
 def process_hinglish() -> list[dict]:
     logger.info("loading Hinglish: WillHeld/hinglish_top (all splits)")
     ds = load_dataset("WillHeld/hinglish_top")
@@ -190,10 +234,17 @@ def main():
         "--limit-hi-mc4-chars", type=int, default=1_000_000_000,
         help="target chars from mC4 Hindi (added at the 500M tier, ~0.7B tokens)",
     )
+    parser.add_argument(
+        "--limit-cosmopedia-chars", type=int, default=0,
+        help="target chars from Cosmopedia English synthetic textbooks (0 = skip; "
+             "added for the 60%%-Chinchilla-optimal data scale-up)",
+    )
     args = parser.parse_args()
 
     en_records = process_english(args.limit_en)
     en_records.extend(process_c4_en(args.limit_en_c4_chars))
+    if args.limit_cosmopedia_chars > 0:
+        en_records.extend(process_cosmopedia(args.limit_cosmopedia_chars))
     write_jsonl(en_records, CLEANED_DIR / "en.jsonl")
 
     hi_records = process_hindi(args.limit_hi)
