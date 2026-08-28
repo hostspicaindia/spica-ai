@@ -16,6 +16,13 @@ RTX5090 included) -- resuming a checkpoint saved WITHOUT --amp into a run
 WITH it (or vice versa) is safe, since checkpoints always store fp32
 master weights/optimizer state regardless; --amp only changes the forward
 pass's compute dtype, not what's saved.
+
+Add --compile for torch.compile (JIT-fuses ops into faster GPU kernels,
+typically another 20-50% on top of --amp). First call after compiling is
+slow (one-time trace+compile, tens of seconds) -- normal, not a hang.
+Checkpointing always targets the ORIGINAL uncompiled model reference, so
+compiled and uncompiled runs can freely resume from each other's
+checkpoints, same as --amp.
 """
 
 import argparse
@@ -88,6 +95,12 @@ def main():
              "the first run using it on this codebase: verify a short run's loss curve looks sane "
              "before trusting it for a long one.",
     )
+    parser.add_argument(
+        "--compile", action="store_true",
+        help="torch.compile the model for faster training (~20-50% on top of --amp). First step is "
+             "slow (one-time compile) -- expected, not a hang. Checkpoints always save/load the "
+             "original uncompiled model, so this is safe to toggle across resumes.",
+    )
     args = parser.parse_args()
 
     if not args.init_checkpoint and not args.resume:
@@ -117,6 +130,14 @@ def main():
     else:
         logger.info(f"starting SFT fresh from pretrained checkpoint {args.init_checkpoint}")
 
+    # compile a SEPARATE reference used only for the forward pass -- `model`
+    # stays the original uncompiled module so save_checkpoint/load_checkpoint
+    # (which call .state_dict()/.load_state_dict() directly) always see plain
+    # keys, never a compiled wrapper's "_orig_mod." prefix.
+    forward_model = torch.compile(model) if args.compile else model
+    if args.compile:
+        logger.info("torch.compile enabled -- first step will be slow (one-time trace+compile)")
+
     tokenizer = load_tokenizer()
     train_loader = get_sft_dataloader(
         ROOT_DIR / train_cfg.train_data, tokenizer, model_cfg.block_size, train_cfg.batch_size, shuffle=True
@@ -145,7 +166,7 @@ def main():
         x, y = x.to(device), y.to(device)
 
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=use_amp):
-            _, loss = model(x, y)
+            _, loss = forward_model(x, y)
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), train_cfg.grad_clip)
@@ -156,7 +177,7 @@ def main():
             logger.info(f"step {step:5d} | loss {loss.item():.4f} | lr {lr:.2e} | {dt:.1f}s elapsed")
 
         if step > 0 and step % train_cfg.eval_interval == 0:
-            val_loss = estimate_val_loss(model, val_loader, train_cfg.eval_iters, device, use_amp)
+            val_loss = estimate_val_loss(forward_model, val_loader, train_cfg.eval_iters, device, use_amp)
             logger.info(f"step {step:5d} | val_loss {val_loss:.4f}")
 
         if step > 0 and step % train_cfg.checkpoint_interval == 0:

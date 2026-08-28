@@ -22,6 +22,13 @@ RTX5090 included) -- resuming a checkpoint saved WITHOUT --amp into a run
 WITH it (or vice versa) is safe, since checkpoints always store fp32
 master weights/optimizer state regardless; --amp only changes the forward
 pass's compute dtype, not what's saved.
+
+Add --compile for torch.compile (JIT-fuses ops into faster GPU kernels,
+typically another 20-50% on top of --amp). First call after compiling is
+slow (one-time trace+compile, tens of seconds) -- normal, not a hang.
+Checkpointing always targets the ORIGINAL uncompiled model reference, so
+compiled and uncompiled runs can freely resume from each other's
+checkpoints, same as --amp.
 """
 
 import argparse
@@ -106,6 +113,12 @@ def main():
              "the first run using it on this codebase: verify a short run's loss curve looks sane "
              "before trusting it for a long one.",
     )
+    parser.add_argument(
+        "--compile", action="store_true",
+        help="torch.compile the model for faster training (~20-50% on top of --amp). First step is "
+             "slow (one-time compile) -- expected, not a hang. Checkpoints always save/load the "
+             "original uncompiled model, so this is safe to toggle across resumes.",
+    )
     args = parser.parse_args()
 
     model_cfg = load_config(args.model_config)
@@ -129,7 +142,15 @@ def main():
     # identical to the single-GPU case (no "module." prefix) and every other
     # script (generate.py, sft_trainer.py) keeps loading checkpoints unchanged
     raw_model = build_model(model_cfg).to(device)
-    model = DDP(raw_model, device_ids=[local_rank]) if is_distributed else raw_model
+    # compile wraps raw_model's forward for speed but shares the same
+    # underlying parameter tensors -- checkpoint save/load below always
+    # targets raw_model directly (never this wrapper), so state_dict keys
+    # stay clean and a compiled run can resume an uncompiled checkpoint
+    # (or vice versa) without any "_orig_mod." prefix mismatch.
+    compiled_model = torch.compile(raw_model) if args.compile else raw_model
+    if args.compile and is_main:
+        logger.info("torch.compile enabled -- first step will be slow (one-time trace+compile)")
+    model = DDP(compiled_model, device_ids=[local_rank]) if is_distributed else compiled_model
     optimizer = build_optimizer(model, train_cfg.learning_rate, train_cfg.weight_decay)
 
     start_step = 0
