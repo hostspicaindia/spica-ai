@@ -31,23 +31,39 @@
 # since per-step time crept up over that run (0.41s early -> 0.54s late).
 # Recalibrate off the first few hundred steps' logged elapsed time.
 #
-# checkpoint_interval=25000 -> ceil(222876/25000)=9 step_*.pt files +
-# 1 latest.pt = 10 files * ~8.25GB = ~82.5GB. Safe on this instance's
-# 250GB disk. Same backup-then-delete discipline once a checkpoint is
-# verified safely backed up locally.
+# RESCALED AGAIN (2026-08-30) -- FRESH init this time (--init-checkpoint,
+# not --resume), from the new full-epoch pretrain checkpoint (60%-scale-up
+# corpus, 1,158,613 steps). Not a continuation, so no lr_max_steps field
+# needed here -- start_step=0 for a fresh run means (step - start_step)
+# already equals step, same as before the resume-schedule fix existed.
+# Dataset grew slightly (445754 -> 452516 pairs) from the identity
+# question-phrasing expansion (180 -> 318 unique identity pairs, added
+# after testing showed indirect/embedded phrasings weren't covered).
+# max_steps: 452516/4 ~= 113129 steps/epoch * 2 ~= 226258. warmup_steps
+# scaled by the same ~1.57% ratio -> 226258*0.0157 ~= 3552, rounded 3550.
+#
+# Expect ~0.18-0.19s/step with --amp --compile (same architecture/batch/
+# block config as the pretrain run that measured this) -- recalibrate off
+# the first real log lines rather than trusting this blindly, per usual.
+#
+# checkpoint_interval=25000 -> ceil(226258/25000)=10 step_*.pt files +
+# 1 latest.pt = 11 files * ~8.25GB = ~90.75GB. Check free disk before
+# starting -- this instance was at 60GB free as of the last check, with
+# ~19 old pretrain snapshots (~150GB+) still pending cleanup. Same
+# backup-then-delete discipline once a checkpoint is verified backed up.
 
 train_data: "data/sft/train.jsonl"
 val_data: "data/sft/val.jsonl"
 
 batch_size: 4               # matches 500M's safe scale (4*1024=4096 tokens/step)
-max_steps: 222876           # ~2 epochs over 445754 pairs at batch_size 4
+max_steps: 226258           # ~2 epochs over 452516 pairs at batch_size 4
 eval_interval: 1500
 eval_iters: 20
 log_interval: 1500
 
 learning_rate: 5.0e-5        # ~6x smaller than pretraining LR -- fine-tune, don't relearn
 min_lr: 5.0e-6
-warmup_steps: 3500
+warmup_steps: 3550
 weight_decay: 0.1
 grad_clip: 1.0
 
