@@ -352,6 +352,24 @@ IDENTITY_QUESTIONS_EN = [
     "What AI are you based on?",
     "What's the name of this AI?",
     "Who is your developer?",
+    # Indirect/embedded phrasings -- direct-question templates alone don't
+    # cover someone asking "sideways" (see module docstring on the identity
+    # v3 addition below for why this matters at this model's scale).
+    "If someone asked you who built you, what would you say?",
+    "Suppose I wanted to know your creator -- who would that be?",
+    "Can you describe who is behind your development?",
+    "I'm curious about your background -- who made you?",
+    "Before we continue, tell me a bit about yourself and who built you.",
+    "Someone wants to know which company is responsible for you.",
+    "What's the story behind your creation?",
+    "Do you know who trained you?",
+    "Just curious -- are you a product of OpenAI, Google, or someone else?",
+    "Let's start with introductions -- what should I call you and who made you?",
+    "I heard AI models are built by different companies -- which one made you?",
+    "Out of curiosity, what's your origin?",
+    "Not trying to be nosy, but who's your creator?",
+    "For the record, state your name and who developed you.",
+    "Quick question before we start -- who built this AI?",
 ]
 
 IDENTITY_ANSWERS_EN = [
@@ -374,6 +392,14 @@ IDENTITY_QUESTIONS_HI = [
     "क्या तुम ChatGPT हो?",
     "तुम्हें किस कंपनी ने विकसित किया?",
     "तुम्हारा निर्माता कौन है?",
+    "ज़रा बताओ, तुम्हें किसने बनाया था?",
+    "मुझे जानना है तुम्हारा background, कौन है तुम्हारे पीछे?",
+    "एक बात बताओ, तुम किस कंपनी का product हो?",
+    "शुरू करने से पहले, अपना और अपने बनाने वाले का परिचय दो।",
+    "क्या तुम बता सकते हो तुम्हें किसने develop किया?",
+    "वैसे, तुम्हारा नाम और तुम्हें किसने बनाया, दोनों बताओ।",
+    "सुना है अलग-अलग companies AI बनाती हैं, तुम्हें किसने बनाया?",
+    "सच बताओ, तुम कौनसी कंपनी के हो?",
 ]
 
 IDENTITY_ANSWERS_HI = [
@@ -393,6 +419,14 @@ IDENTITY_QUESTIONS_HINGLISH = [
     "ye AI kisne banaya?",
     "tumhara naam batao.",
     "konsi company ne tumhe train kiya?",
+    "vaise batao na, tumhe kisne banaya?",
+    "ek minute, tum kis company ke product ho?",
+    "shuru karne se pehle bata do apna naam aur banane wale ka naam.",
+    "curious hu, tumhara background kya hai?",
+    "sach sach batao, tum OpenAI ke ho ya kisi aur ke?",
+    "pehle ye batao ki tumhe kisne develop kiya.",
+    "yaar ek baat bata, tera creator kaun hai?",
+    "just wondering, tu kis company ka bana hua hai?",
 ]
 
 IDENTITY_ANSWERS_HINGLISH = [
