@@ -84,6 +84,16 @@ def main():
     if args.instruct:
         prompt = f"### Instruction:\n{args.prompt}\n\n### Response:\n"
 
+    # Only stop at EOS in --instruct mode. Pretrain data puts EOS after
+    # EVERY sentence (see pack_dataset.py), so stopping at the first one
+    # in raw completion mode would cut generation off after one sentence
+    # -- not what raw-fluency testing wants. SFT data puts EOS only at the
+    # end of the whole response (see sft_dataset.py), so there stopping at
+    # EOS is exactly correct: it's the model's learned "I'm done" signal,
+    # and generating past it forces made-up continuation the model was
+    # never trained to produce (the "correct answer, then garbage" pattern).
+    eos_token_id = tokenizer.eos_token_id if args.instruct else None
+
     idx = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long, device=device)
     out = model.generate(
         idx,
@@ -91,6 +101,7 @@ def main():
         temperature=args.temperature,
         top_k=args.top_k,
         repetition_penalty=args.repetition_penalty,
+        eos_token_id=eos_token_id,
     )
     text = tokenizer.decode(out[0].tolist())
 

@@ -75,6 +75,7 @@ class GPT(nn.Module):
         temperature: float = 1.0,
         top_k: int = None,
         repetition_penalty: float = 1.0,
+        eos_token_id: int = None,
     ) -> torch.Tensor:
         for _ in range(max_new_tokens):
             idx_cond = idx if idx.size(1) <= self.block_size else idx[:, -self.block_size:]
@@ -98,5 +99,16 @@ class GPT(nn.Module):
             probs = F.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_token], dim=1)
+
+            # SFT training always appends eos right after the response (see
+            # sft_dataset.py), so the model has genuinely learned "stop here"
+            # -- but without this check, generation ignored that and forced
+            # max_new_tokens more tokens regardless, pushing the model into
+            # out-of-distribution territory right after a correct short
+            # answer (the "correct answer, then garbage" pattern seen on
+            # arithmetic/identity prompts). batch_size=1 only for now (the
+            # only way this project's generate.py actually calls this).
+            if eos_token_id is not None and idx.size(0) == 1 and next_token.item() == eos_token_id:
+                break
 
         return idx
